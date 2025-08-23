@@ -1,28 +1,42 @@
 # Workflow Engine (Entity‑Component System)
 
-This project contains a simple Entity‑Component System (ECS) implementation
-tailored for building modular workflows. It allows you to queue arbitrary
-tasks, route them through predefined phases, and delegate work to
-registered handlers. Tasks can be processed by either an agentic assistant
-or a human, and external subprocesses can be invoked to handle specific
-classifications.
+This project contains a modular Entity‑Component System (ECS) implementation
+for orchestrating complex workflows. It allows you to queue arbitrary tasks,
+route them through predefined phases, and delegate work to registered
+handlers. Tasks can be processed by a human, an agentic assistant, or a
+functional subprocess, and artifacts produced in one phase can be mounted
+into subsequent phases. Persistent state ensures tasks survive restarts.
 
 ## Features
 
 - **Asynchronous event loop** – Uses Python’s `asyncio` to process tasks
   concurrently without blocking throughput.
-- **Flexible classification** – Tasks can be pre‑classified or left
-  unclassified. Each workflow phase defines its target classification and
-  possible next states.
+- **Flexible classification & workflows** – Tasks can be pre‑classified or
+  unclassified. Each workflow phase defines its target classification, an
+  optional list of next classifications and an optional `assigned_to`
+  override ("human", "agentic", or "functional"). The engine advances
+  tasks through the phases automatically.
+- **Task types & adapters** – Built‑in adapters for three task types
+  (human, agentic and functional). Adapters encapsulate how to execute a
+  handler: sending a request to a human, invoking an LLM/tool agent, or
+  running a subprocess. You can register your own adapters.
+- **Rich task lifecycle** – Tasks carry a `status` (pending, in
+  progress, waiting on human/agent/IO, completed, failed), a context
+  dictionary and a list of artifacts. Suspend and resume tasks waiting for
+  external input via `engine.suspend`/`engine.resume`.
+- **Persistent queue & artifacts** – Tasks and their artifacts are
+  persisted to JSON and disk. Pending tasks survive process restarts and
+  resume processing where they left off. Artifacts (text/binary files)
+  produced in one phase can be mounted in later phases.
+- **Meta “define_workflow”** – A built‑in classification that accepts a
+  `WorkflowSpec` dict and dynamically registers a new workflow. The current
+  task is rebound to the defined workflow and continues processing.
 - **Handler registry** – Register async functions as handlers for
-  classifications. Handlers may call external processes or services.
-- **Workflow definitions** – Register workflows as ordered lists of phases.
-  The engine advances tasks through the phases automatically.
-- **Assignment concept** – Tasks include an `assigned_to` attribute
-  (`"ai"` or `"human"`) so handlers can decide whether to run automated
-  logic or request human input.
-- **Extensible** – Designed to be minimal; additional systems (e.g.,
-  classification logic, persistence layers) can be layered on top.
+  classifications. Handlers may call external processes or services and
+  interact with adapters.
+- **Extensible design** – The core is intentionally lightweight. You can
+  plug in your own classification logic, adapters, storage backends or
+  additional lifecycle hooks without modifying the engine.
 
 ## Getting started
 
@@ -30,13 +44,18 @@ classifications.
    external packages.
 2. **Define handlers** for your classifications. Handlers must be
    `async` functions that accept a `Task` object and assign output to
-   `task.output`.
+   `task.output`. They may also call `engine.add_artifact_text/bytes` to
+   persist files or call `engine.suspend` to wait for human/agentic
+   input.
 3. **Register workflows** as lists of `Phase` objects. Each phase
-   specifies a target classification and an optional list of next
-   classifications.
-4. **Submit tasks** with `submit_task(data, workflow_name, classification=None,
+   specifies a target classification, optional list of next classifications
+   and optional `assigned_to` override.
+4. **Register adapters** for your task types if you need custom behaviour.
+   The engine provides default adapters for human (suspend), agentic and
+   functional tasks.
+5. **Submit tasks** with `submit_task(data, workflow_name, classification=None,
    assigned_to="ai")`.
-5. **Run the engine** using `await engine.run()`. Stop it by calling
+6. **Run the engine** using `await engine.run()`. Stop it by calling
    `engine.stop()`.
 
 See `ecs_workflow.py` for a complete example in the `__main__` block.
