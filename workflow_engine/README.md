@@ -36,7 +36,39 @@ into subsequent phases. Persistent state ensures tasks survive restarts.
   interact with adapters.
 - **Extensible design** – The core is intentionally lightweight. You can
   plug in your own classification logic, adapters, storage backends or
-  additional lifecycle hooks without modifying the engine.
+  additional lifecycle
+### Kafka integration
+
+While the engine ships with an in memory queue by default, real‑world
+deployments often benefit from using an external message broker. This
+repository includes a `KafkaMQInterface` in
+`workflow_engine/kafka_interface.py` that leverages
+[`kafka-python`](https://pypi.org/project/kafka-python/). It provides
+
+1. **Publishing tasks** – After creating and submitting a `Task` via
+   `engine.submit_task`, you can call `await kafka_interface.publish_task(task)`
+   to serialize and send the task description to a Kafka topic. This
+   allows producers outside the Python process (e.g. other services) to
+   consume pending tasks.
+
+2. **Publishing results** – The engine exposes a method
+   `register_task_completed_hook` that accepts an async callback.
+   Registering `kafka_interface.publish_result` as such a hook will
+   automatically serialize and publish completed tasks (including their
+   status, output and artifact metadata) to a Kafka results topic.
+
+3. **Consuming tasks** – To integrate with an external producer, call
+   `await kafka_interface.consume_tasks(engine)` in the background.
+   It will continuously poll the Kafka tasks topic, deserialize
+   incoming messages and submit them to the workflow engine via
+   `engine.submit_task`. When finished, call `kafka_interface.stop_consuming()`
+   to terminate the loop.
+
+You can customise the broker address, topic names and consumer group via
+constructor parameters. See the docstring in
+`workflow_engine/kafka_interface.py` for usage examples and details.
+
+ hooks without modifying the engine.
 
 ## Getting started
 
