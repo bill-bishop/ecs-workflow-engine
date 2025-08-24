@@ -142,3 +142,38 @@ To deploy this project to your GitHub:
 You will need to authenticate with GitHub when pushing; use a Personal
 Access Token (PAT) if two‑factor authentication is enabled on your
 account.
+
+
+## OpenAI agent integration
+
+You can delegate agentic tasks to OpenAI's Chat API using the provided `OpenAIAgentAdapter`. The adapter reads your API key from the `OPENAI_API_KEY` environment variable and uses OpenAI's chat completion models to process tasks. To enable it, register the adapter for the agentic task type:
+
+```python
+from workflow_engine.openai_agent_adapter import OpenAIAgentAdapter
+from workflow_engine.ecs_workflow import TaskType
+
+engine.register_adapter(TaskType.AGENTIC, OpenAIAgentAdapter(model="gpt-4o"))
+```
+
+
+Make sure you set the `OPENAI_API_KEY` environment variable before running the engine.
+
+## Web UI
+
+A simple Flask-based dashboard is provided in `workflow_engine/ui_server.py` for interacting with the workflow engine and Kafka message queue. The UI lets you:
+
+- View pending and in-progress tasks and their status.
+- Submit new tasks to a workflow.
+- Provide outputs for tasks waiting on human input (resume tasks).
+
+To start the web server:
+
+```bash
+export OPENAI_API_KEY=sk-...
+export KAFKA_BROKERS=localhost:9092  # optional; omit if not using Kafka
+python -m workflow_engine.ui_server
+```
+
+The server will run on `http://127.0.0.1:5000` by default. Navigate to that URL in your browser to access the dashboard.
+
+If `KAFKA_BROKERS` is set, the UI will publish new tasks to Kafka and consume completed-task messages automatically. Otherwise, tasks remain in memory.
