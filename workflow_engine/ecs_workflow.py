@@ -179,6 +179,9 @@ class ECSWorkflowEngine:
         self._artifacts_dir.mkdir(parents=True, exist_ok=True)
         # List of pending tasks (those enqueued but not yet finished)
         self._pending_tasks: List[Task] = []
+              # Hooks invoked when a task reaches the COMPLETED status
+        self._task_completed_hooks: List[Callable[[Task], Awaitable[None]]] = []
+
         # Load any persisted tasks
         self._load_pending_tasks()
 
@@ -503,6 +506,14 @@ class ECSWorkflowEngine:
                 pass
         # Persist final state
         self._save_pending_tasks()
+              # Invoke any registered completion hooks
+        if self._task_completed_hooks:
+            for hook in list(self._task_completed_hooks):
+                try:
+                    await hook(task)
+                except Exception:
+                    pass
+
 
     async def run(self) -> None:
         """Continuously process tasks from the queue until stopped."""
@@ -520,6 +531,21 @@ class ECSWorkflowEngine:
         self._running = False
 
     # ------------------------------------------------------------------
+      def register_task_completed_hook(self, hook: Callable[[Task], Awaitable[None]]) -> None:
+        """Register a coroutine to be invoked when a task reaches the COMPLETED status.
+
+        Hooks will be awaited in the order they are registered. Exceptions
+        raised by hooks are caught and ignored to avoid interfering with
+        task processing.
+
+        Args:
+            hook: An async callable that accepts a completed Task.
+        """
+        if not asyncio.iscoroutinefunction(hook):
+            raise TypeError("Task completed hooks must be async functions")
+        self._task_completed_hooks.append(hook)
+
+
     # Adapter registration and artifact helpers
 
     def register_adapter(self, task_type: TaskType, adapter: Any) -> None:
