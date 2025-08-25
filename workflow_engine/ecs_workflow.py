@@ -531,7 +531,7 @@ class ECSWorkflowEngine:
         self._running = False
 
     # ------------------------------------------------------------------
-      def register_task_completed_hook(self, hook: Callable[[Task], Awaitable[None]]) -> None:
+    def register_task_completed_hook(self, hook: Callable[[Task], Awaitable[None]]) -> None:
         """Register a coroutine to be invoked when a task reaches the COMPLETED status.
 
         Hooks will be awaited in the order they are registered. Exceptions

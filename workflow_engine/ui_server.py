@@ -31,8 +31,8 @@ import json
 import os
 import threading
 from typing import Any, List, Optional
-
-from flask import Flask, redirect, render_template_string, request, url_for
+from .ecs_workflow import Phase, Task
+from flask import Flask, jsonify, redirect, render_template_string, request, url_for, current_app
 
 from .ecs_workflow import ECSWorkflowEngine, Task, TaskStatus, Phase, TaskType
 from .kafka_interface import KafkaMQInterface  # noqa: F401
@@ -56,6 +56,16 @@ if _brokers:
 
 # Create and start an asyncio event loop for the engine and Kafka consumer
 _loop = asyncio.new_event_loop()
+
+
+# Simple echo handler
+async def echo_handler(task: Task) -> None:
+    task.output = {"handled": task.classification, "data": task.data}
+
+
+# Register a minimal workflow you can submit to from the form
+engine.register_handler("process", echo_handler)
+engine.register_workflow("default", [Phase(target_classification="process")])
 
 def _start_async_services() -> None:
     """Start the workflow engine and optionally the Kafka consumer."""
@@ -105,55 +115,60 @@ def index() -> str:
         tasks=tasks,
     )
 
-
 @app.route("/submit", methods=["GET", "POST"])
-def submit_task() -> str:
-    """Submit a new task via a form."""
-    if request.method == "POST":
-        workflow_name = request.form["workflow_name"].strip()
-        classification = request.form.get("classification", "").strip() or None
-        assigned_to = request.form.get("assigned_to", "ai").strip() or "ai"
-        data_text = request.form["data"].strip()
-        # Try to parse JSON; fallback to raw string
-        try:
-            data: Any = json.loads(data_text)
-        except Exception:
-            data = data_text
-        # Submit the task asynchronously and obtain the Task instance
-        future = asyncio.run_coroutine_threadsafe(
-            engine.submit_task(
-                data=data,
-                workflow_name=workflow_name,
-                classification=classification,
-                assigned_to=assigned_to,
-            ),
-            _loop,
+def submit_task():
+    if request.method == "GET":
+        return render_template_string(
+            """
+            <h1>Submit New Task</h1>
+            <form method="post">
+                <p>Workflow name: <input type="text" name="workflow_name" required></p>
+                <p>Classification (optional): <input type="text" name="classification"></p>
+                <p>Assigned to (ai, human, functional): <input type="text" name="assigned_to" value="ai"></p>
+                <p>Data (JSON or text):<br><textarea name="data" rows="6" cols="60"></textarea></p>
+                <p><input type="submit" value="Submit"></p>
+            </form>
+            <p><a href="{{ url_for('index') }}">Back to dashboard</a></p>
+            """,
         )
-        try:
-            task_obj: Task = future.result()
-            # Publish to Kafka if configured
-            if kafka_interface is not None:
-                asyncio.run_coroutine_threadsafe(
-                    kafka_interface.publish_task(task_obj), _loop
-                )
-        except Exception:
-            pass
-        return redirect(url_for("index"))
-    # GET request: show the form
-    return render_template_string(
-        """
-        <h1>Submit New Task</h1>
-        <form method="post">
-            <p>Workflow name: <input type="text" name="workflow_name" required></p>
-            <p>Classification (optional): <input type="text" name="classification"></p>
-            <p>Assigned to (ai, human, functional): <input type="text" name="assigned_to" value="ai"></p>
-            <p>Data (JSON or text):<br><textarea name="data" rows="6" cols="60"></textarea></p>
-            <p><input type="submit" value="Submit"></p>
-        </form>
-        <p><a href="{{ url_for('index') }}">Back to dashboard</a></p>
-        """,
-    )
 
+
+    workflow_name = (request.form.get("workflow_name") or "").strip()
+    classification = (request.form.get("classification") or None)
+    assigned_to = (request.form.get("assigned_to") or "ai").strip() or "ai"
+    raw = (request.form.get("data") or "").strip()
+
+
+    if not workflow_name:
+        return ("Missing workflow_name", 400)
+
+
+    try:
+        data = json.loads(raw)
+    except Exception:
+        data = raw
+
+
+    # Schedule and WAIT so we can surface errors (e.g., unknown workflow)
+    fut = asyncio.run_coroutine_threadsafe(
+        engine.submit_task(
+            data=data,
+            workflow_name=workflow_name,
+            classification=classification,
+            assigned_to=assigned_to,
+        ),
+        _loop,
+    )
+    try:
+        task = fut.result(timeout=5)
+        current_app.logger.info("Enqueued task %s", task.id)
+    except Exception as e:
+        current_app.logger.exception("Submit failed")
+        return (f"Submit failed: {e}", 400)
+
+
+    # Classic PRG but explicit
+    return redirect(url_for("index"), code=303)
 
 @app.route("/resume/<task_id>", methods=["GET", "POST"])
 def resume_task(task_id: str) -> str:
